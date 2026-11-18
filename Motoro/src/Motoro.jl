@@ -31,7 +31,7 @@ export FloatingPriceArithmeticAsianCall, FloatingPriceArithmeticAsianPut
 # Pricing models and primary API
 export price, delta, B, replicate!
 export extract_binomial_tree_parameters, up_down_factors, risk_neutral_probability, forward_pass 
-export get_full_tree, to_dicts, to_namedtuples, print_tree
+export get_full_tree, to_dicts, to_namedtuples, print_tree, node_at
 export Binomial, BlackScholes
 export MonteCarlo, RiskNeutralMonteCarlo
 export VarianceReductionMethod, VarianceReduction

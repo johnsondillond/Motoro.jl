@@ -270,7 +270,7 @@ end
 Fill in Δ, B and the continuation value of `node` from its two children.
 Shared by all option types; only the choice of `node.price` differs.
 
-    Δ = e^{-δh} (C_u - C_d) / (Sᵤ - S_d)
+    Δ = e^{-δh} (C_u - C_d) / (S(u - d))
     B = e^{-rh} (u C_d - d C_u) / (u - d)
     continuation = e^{-rh} (p* C_u + (1-p*) C_d) = Δ S + B
 """
@@ -365,11 +365,39 @@ end
 # =============================================================================
 
 """
-    price(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree())
+    node_at(t::FullBinomialTree, step::Integer, ups::Integer) -> TreeNode
 
-Price a European or American option on a binomial tree: the root price of
+Return the node at time step `step` with `ups` up moves, checking that it
+exists (0 ≤ step ≤ N and 0 ≤ ups ≤ step).
+"""
+function node_at(t::FullBinomialTree, step::Integer, ups::Integer)
+    N = nsteps(t)
+    0 <= step <= N || throw(ArgumentError("step must be between 0 and $N, got $step"))
+    0 <= ups <= step || throw(ArgumentError("ups must be between 0 and step = $step, got $ups"))
+    return t[step, ups]
+end
+
+"""
+    interior_node_at(t::FullBinomialTree, step::Integer, ups::Integer, what::String) -> TreeNode
+
+Like [`node_at`](@ref), but also rejects expiry nodes, where there is no
+replicating portfolio (Δ and B are undefined).
+"""
+function interior_node_at(t::FullBinomialTree, step::Integer, ups::Integer, what::String)
+    N = nsteps(t)
+    step < N || throw(ArgumentError("$what is not defined at expiry (step $N); use step ≤ $(N - 1)"))
+    return node_at(t, step, ups)
+end
+
+"""
+    price(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree(); step = 0, ups = 0)
+
+Price a European or American option on a binomial tree, read off
 [`get_full_tree`](@ref). Which `get_full_tree` method runs (with or without
 early exercise) is chosen by the option's type.
+
+By default this is the root (today's) price. Pass `step` and `ups` to get the
+option value at any other node.
 
 # Arguments
 - `option`: a European option ([`EuropeanCall`](@ref), [`EuropeanPut`](@ref)) or an
@@ -379,64 +407,96 @@ early exercise) is chosen by the option's type.
 - `tree::BinomialTree`: [`CRRTree`](@ref) (default), [`ForwardTree`](@ref) or
   [`LognormalTree`](@ref), used to compute u, d (when not given in `model`) and p*
 
+# Keywords
+- `step::Integer = 0`: time step i, from 0 to `model.steps`
+- `ups::Integer = 0`: number of up moves j, from 0 to `step`
+
 # Returns
-An [`AnalyticResult`](@ref) with the option price.
+An [`AnalyticResult`](@ref) with the option price at that node.
 
 # Examples
 ```julia
 data = MarketData(41.0, 0.08, 0.30, 0.0)
-price(EuropeanCall(40.0, 1.0), Binomial(100), data, CRRTree())
-price(AmericanPut(40.0, 1.0),  Binomial(100), data)
+price(EuropeanCall(40.0, 1.0), Binomial(3), data, CRRTree())        # root
+price(AmericanPut(40.0, 1.0),  Binomial(3), data; step = 2, ups = 1)
 ```
 
 See also: [`get_full_tree`](@ref), [`delta`](@ref), [`B`](@ref), [`BlackScholes`](@ref)
 """
-price(option::VanillaOption, model::Binomial, data::MarketData, tree::BinomialTree) =
-    AnalyticResult(root(get_full_tree(option, model, data, tree)).price)
+function price(option, model::Binomial, data::MarketData, tree::BinomialTree;
+               step::Integer = 0, ups::Integer = 0)
+    t = get_full_tree(option, model, data, tree)
+    return AnalyticResult(node_at(t, step, ups).price)
+end
 
-price(option::VanillaOption, model::Binomial, data::MarketData) = price(option, model, data, CRRTree())
+price(option, model::Binomial, data::MarketData; kwargs...) =
+    price(option, model, data, CRRTree(); kwargs...)
 
 """
-    delta(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree()) -> Float64
+    delta(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree(); step = 0, ups = 0) -> Float64
 
-Binomial delta: the Δ of the replicating portfolio at the root of
+Binomial delta: the Δ of the replicating portfolio at a node of
 [`get_full_tree`](@ref), Δ = e^{-δh} (C_u - C_d) / (S(u - d)).
 
+By default this is the root. Pass `step` and `ups` for any node before expiry;
+Δ is not defined at expiry nodes.
+
 For a call, delta is in `[0, 1]`; for a put, in `[-1, 0]`.
+
+# Keywords
+- `step::Integer = 0`: time step i, from 0 to `model.steps - 1`
+- `ups::Integer = 0`: number of up moves j, from 0 to `step`
 
 # Examples
 ```julia
 data = MarketData(100.0, 0.05, 0.2, 0.0)
-delta(EuropeanCall(100.0, 1.0), Binomial(100), data, CRRTree())  # ≈ BSM delta for large steps
+delta(EuropeanCall(100.0, 1.0), Binomial(100), data, CRRTree())
+delta(EuropeanCall(100.0, 1.0), Binomial(3), data; step = 1, ups = 1)
 ```
 
 See also: [`price`](@ref), [`B`](@ref), [`get_full_tree`](@ref)
 """
-delta(option::VanillaOption, model::Binomial, data::MarketData, tree::BinomialTree) =
-    root(get_full_tree(option, model, data, tree)).delta
+function delta(option, model::Binomial, data::MarketData, tree::BinomialTree;
+               step::Integer = 0, ups::Integer = 0)
+    t = get_full_tree(option, model, data, tree)
+    return interior_node_at(t, step, ups, "delta").delta
+end
 
-delta(option::VanillaOption, model::Binomial, data::MarketData) = delta(option, model, data, CRRTree())
+delta(option, model::Binomial, data::MarketData; kwargs...) =
+    delta(option, model, data, CRRTree(); kwargs...)
 
 """
-    B(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree()) -> Float64
+    B(option, model::Binomial, data::MarketData, tree::BinomialTree = CRRTree(); step = 0, ups = 0) -> Float64
 
-Binomial bond position B of the replicating portfolio at the root of
+Binomial bond position B of the replicating portfolio at a node of
 [`get_full_tree`](@ref), B = e^{-rh} (u C_d - d C_u) / (u - d).
 
+By default this is the root. Pass `step` and `ups` for any node before expiry;
+B is not defined at expiry nodes.
+
 B is negative for calls (borrowing) and positive for puts (lending).
+
+# Keywords
+- `step::Integer = 0`: time step i, from 0 to `model.steps - 1`
+- `ups::Integer = 0`: number of up moves j, from 0 to `step`
 
 # Examples
 ```julia
 data = MarketData(100.0, 0.05, 0.2, 0.0)
 B(EuropeanCall(100.0, 1.0), Binomial(100), data, CRRTree())
+B(EuropeanPut(100.0, 1.0),  Binomial(3), data; step = 2, ups = 0)
 ```
 
 See also: [`price`](@ref), [`delta`](@ref), [`get_full_tree`](@ref)
 """
-B(option, model::Binomial, data::MarketData, tree::BinomialTree) =
-    root(get_full_tree(option, model, data, tree)).bond
+function B(option, model::Binomial, data::MarketData, tree::BinomialTree;
+           step::Integer = 0, ups::Integer = 0)
+    t = get_full_tree(option, model, data, tree)
+    return interior_node_at(t, step, ups, "B").bond
+end
 
-B(option, model::Binomial, data::MarketData) = B(option, model, data, CRRTree())
+B(option, model::Binomial, data::MarketData; kwargs...) =
+    B(option, model, data, CRRTree(); kwargs...)
 
 # =============================================================================
 # Full tree export and display helpers
