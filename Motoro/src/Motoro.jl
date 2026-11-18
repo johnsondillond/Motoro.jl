@@ -29,7 +29,9 @@ export FloatingStrikeArithmeticAsianCall, FloatingStrikeArithmeticAsianPut
 export FloatingPriceArithmeticAsianCall, FloatingPriceArithmeticAsianPut
 
 # Pricing models and primary API
-export price, delta
+export price, delta, B, replicate!
+export extract_binomial_tree_parameters, up_down_factors, risk_neutral_probability, forward_pass 
+export get_full_tree, to_dicts, to_namedtuples, print_tree
 export Binomial, BlackScholes
 export MonteCarlo, RiskNeutralMonteCarlo
 export VarianceReductionMethod, VarianceReduction
@@ -46,5 +48,8 @@ export HedgedMonteCarlo
 # Control variate
 export BetaMethod, FixedBeta, OptimalBeta
 export ControlVariate, ControlVariateMonteCarlo
+
+# Trees
+export BinomialTree, CRRTree, ForwardTree, LognormalTree, TreeParams
 
 end # module Motoro
